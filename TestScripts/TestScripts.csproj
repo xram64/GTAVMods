@@ -55,6 +55,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="KeyCodeChecker.cs" />
     <Compile Include="TestScripts.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
