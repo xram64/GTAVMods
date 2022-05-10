@@ -19,7 +19,7 @@ using GTA.Math;
 
 public class RunThere : Script
 {
-    const int PED_RADIUS = 50;  // peds within this radius will be included in the command
+    const int PED_RADIUS = 100;  // peds within this radius will be included in the command
 
     int moveDistance = 20;      // set default distance
 
@@ -204,9 +204,15 @@ public class NightmareMode : Script
 
                 if (!ped.IsPlayer)  // only apply to NPCs
                 {
+                    //ped.HasGravity = false;
+
                     if (ped.HeightAboveGround < 10)
                     {
-                        forceDir = new Vector3(0, 0, 0.5f);
+                        forceDir = new Vector3(0, 0, 0.75f);
+                    }
+                    else if (ped.HeightAboveGround > 25)
+                    {
+                        forceDir = new Vector3(0, 0, -0.75f);
                     }
                     else
                     {
