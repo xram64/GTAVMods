@@ -12,8 +12,7 @@ using GTA.Math;
  *  -  [  : Decrease distance
  *  -  ]  : Increase distance
  *  
- * [TODO]
- *  - Make a system to toggle parts of this mod on and off (create a menu?)
+ * [TODO] Make a system to toggle parts of this mod on and off (create a menu?)
  */
 
 namespace Tools
@@ -101,7 +100,7 @@ namespace Tools
 
     public class NightmareMode : Script
     {
-        bool active;
+        internal bool active;
         int pedRadius;
         Vector3 forceRotation;
         double forceAngle;

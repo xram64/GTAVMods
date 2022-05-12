@@ -11,7 +11,7 @@ using GTA.Math;
  * [Keys Used]
  *  -  \  : 
  *  
- * [TODO]
+ * [TODO] ...
  * 
  */
 
@@ -70,7 +70,7 @@ public class DiscreteMod : Script
 }
 
 
-
+// [TODO] Replace function used in TestScripts with this one?
 public static class Helpers
 {
     public static void ChangeDistance(ref int dist, string direction, bool showDebug = false)
