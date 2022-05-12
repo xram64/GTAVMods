@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading.Tasks;
 using System.Drawing;
 using System.Collections.Generic;
 using System.Windows.Forms;
@@ -17,10 +18,8 @@ using GTA.Native;
  * https://gtaforums.com/topic/789907-community-script-hook-v-net
  * 
  * [Examples]
- * https://github.com/winject/ForceActionMode
- * https://github.com/logicspawn/GTARPG
- * https://github.com/oldnapalm/BicycleCity
- * https://github.com/udoprog/ChaosMod
+ * https://github.com/winject/ForceActionMode | https://github.com/logicspawn/GTARPG
+ * https://github.com/oldnapalm/BicycleCity   | https://github.com/udoprog/ChaosMod
  * 
  ***************************************************************************************|
  * 
@@ -30,51 +29,34 @@ using GTA.Native;
  *    
  * - SHV.NET Namespaces: GTA, GTA.Math, GTA.Native, GTA.NaturalMotion
  * 
- * - Useful classes:
- *   - Game, World, Entity, Ped, Vehicle, Weapon, Task, Native.PedHash
- *   
- * - Interesting methods/properties:
- *   - Ped.StaysInVehicleWhenJacked, Ped.Euphoria
+ * - Useful classes: Game, World, Entity, Ped, Vehicle, Weapon, Task, Native.PedHash
  * 
  * [Keys Enum]
  * - "[" = OemOpenBrackets = Oem4,  "]" = OemCloseBrackets = Oem6, "\" = OemPipe/Oem5
  * - ";" = Oem1 = OemSemicolon,  "'" = Oem7 = OemQuotes
  * - "," = Oemcomma,  "." = OemPeriod,  "/" = OemQuestion
- * 
- * 
- * [Ideas]
- * - Single-elimination battle royale: First contestent ped is chosen and picks a fight 
- *    with a random nearby ped. Winner of fight takes on another nearby ped, and so on.
- *    (Keep track of current champion on screen?)
- *    (Declare winner after a certain number rounds/wins?)
- *    
- *  - Initiate targeted car chases between two or more peds.
- *  
- *  - Add "wanted level" to ped, plus health/weapon mods.
- *  
  *  
 \***************************************************************************************/
 
 namespace TestScripts
 {
+    /// <summary>
+    /// Entry point for all test scripts. Scripts are instantiated and toggled from here.
+    /// </summary>
     public class TestScripts : Script
     {
-        /// <summary>
-        /// Starting point for all test scripts. Scripts can be loaded and unloaded.
-        /// </summary>
-
-        // [TODO]
-        //  • Move "active = !active" and Notification lines from individual KeyUp methods to MainKeyUp?
-
-        // [HACK] //
+        // [HACK] Make a better way to do this kind of thing.
         public static float TEMPFORCERADIUS = 20;
 
-        Dictionary<TestScriptTemplate, Keys> scripts;
+
+        private Dictionary<TestScriptTemplate, Keys> scripts;
+        private const int notificationTimeout = 200;
 
 
         public TestScripts()
         {
             // Instantiate each script class and map its keybind in a dict (list all script class names here)
+            // [IDEA] Use numpad for all keybinds, combined with Shift and Ctrl for 30 total keys.
             scripts = new Dictionary<TestScriptTemplate, Keys>();
             scripts.Add(new TS_NearbyPedsStartFighting(), Keys.NumPad3);
             scripts.Add(new TS_MatrixMode(), Keys.NumPad2);
@@ -82,7 +64,7 @@ namespace TestScripts
             scripts.Add(new TS_CarDance(), Keys.None);
             scripts.Add(new TS_HelicopterBuddies(), Keys.NumPad1);
             scripts.Add(new TS_FollowMode(), Keys.OemPipe);
-
+            scripts.Add(new TS_PreciseTeleport(), Keys.None);
 
             // Append script functions for handling key presses and actions on ticks
             KeyUp += MainKeyUp;
@@ -90,27 +72,42 @@ namespace TestScripts
             Tick += MainTick;
         }
 
-
         public void MainKeyUp(object sender, KeyEventArgs e)
         {
             // Run the ScriptKeyUp() method of each script, if its designated hotkey was pressed.
-            foreach (KeyValuePair<TestScriptTemplate, Keys> scriptToHotkey in scripts)
+            foreach (KeyValuePair<TestScriptTemplate, Keys> script_hotkey in scripts)
             {
-                if (e.KeyCode == scriptToHotkey.Value)
+                // List to hold handles for notifications to "Hide" them after a time delay,
+                //  preventing new notifications being lost due to existing ones staying active.
+                //List<int> notificationHandles = new List<int>();
+
+                int notifHandle;
+
+                (var script, var hotkey) = (script_hotkey.Key, script_hotkey.Value);
+
+                if (e.KeyCode == hotkey)  // key pressed matches this script's hotkey
                 {
-                    TestScriptTemplate script = scriptToHotkey.Key;
-                    scriptToHotkey.Key.ScriptKeyUp();
+                    // Handle toggling of script 'active' flag and display status notifications.
+                    script.ToggleActive();
 
-                    active = !active;
-
-                    if (active)
-                        GTA.UI.Notification.Show("Helicopter Buddies: ~g~Active~s~");
+                    if (script.active)
+                    {
+                        notifHandle = GTA.UI.Notification.Show(script.name + ": ~g~Active~s~");
+                        Task.Delay(notificationTimeout).ContinueWith(o => { GTA.UI.Notification.Hide(notifHandle); TestAPI.DebugMsg<string>(notifHandle.ToString() + "active hidden after" + notificationTimeout.ToString() + "ms"); });
+                    }
                     else
-                        GTA.UI.Notification.Show("Helicopter Buddies: ~r~Disabled~s~");
+                    {
+                        notifHandle = GTA.UI.Notification.Show(script.name + ": ~r~Disabled~s~");
+                        Task.Delay(notificationTimeout).ContinueWith(o => GTA.UI.Notification.Hide(notifHandle));
+                    }
+
+
+                    // Run any additional code provided by script's KeyUp method.
+                    script.ScriptKeyUp();
                 }
             }
 
-            // [HACK] //
+            // [HACK] See TEMPFORCERADIUS defn
             //  [  : Decrease radius
             if (e.KeyCode == Keys.OemOpenBrackets)
                 ModifyValues.ChangeRadius(ref TestScripts.TEMPFORCERADIUS, "Down");
@@ -123,11 +120,14 @@ namespace TestScripts
         private void MainKeyDown(object sender, KeyEventArgs e)
         {
             // Run the ScriptKeyDown() method of each script, if its designated hotkey was pressed.
-            foreach (KeyValuePair<TestScriptTemplate, Keys> scriptToHotkey in scripts)
+            foreach (KeyValuePair<TestScriptTemplate, Keys> script_hotkey in scripts)
             {
-                if (e.KeyCode == scriptToHotkey.Value)
+                (var script, var hotkey) = (script_hotkey.Key, script_hotkey.Value);
+
+                if (e.KeyCode == hotkey)  // key pressed matches this script's hotkey
                 {
-                    scriptToHotkey.Key.ScriptKeyDown();
+                    // Run any additional code provided by script's KeyDown method.
+                    script.ScriptKeyDown();
                 }
             }
         }
@@ -140,20 +140,55 @@ namespace TestScripts
                 script.ScriptTick();
             }
         }
-
-
     }
 
     // Abstract type to define the interface for each script to follow.
+    // [TODO] Convert to interface?
+    /// <summary>
+    /// Template for testing scripts in this project to follow.
+    /// </summary>
+    /// <remarks>
+    /// Make sure to update 'this.name' in each derived script, 
+    /// and add the script's class name to the dictionary in TestScripts.
+    /// </remarks>
     public abstract class TestScriptTemplate
     {
+        /// <summary>
+        /// Common name for the script.
+        /// </summary>
+        /// <remarks>
+        /// This should be overridden by the script class constructor. Default value is "Unknown".
+        /// </remarks>
+        internal string name = "Unknown";
+
+        // Bool inherited by each script to track its Active/Disabled state.
+        /// <summary>
+        /// Current state of script. Script is 'Active' if true, and 'Disabled' if false.
+        /// </summary>
+        internal bool active = false;
+
+        /// <summary>
+        /// Toggles state of script between 'Active' and 'Disabled'.
+        /// </summary>
+        public void ToggleActive()
+        {
+            active = !active;
+        }
+
+        /// <summary>
+        /// Code for this script to run on KeyDown events for its designated keybind.
+        /// </summary>
         public abstract void ScriptKeyDown();
+        /// <summary>
+        /// Code for this script to run on KeyUp events for its designated keybind.
+        /// </summary>
         public abstract void ScriptKeyUp();
         /// <summary>
         /// Code for this script to run on each tick.
         /// </summary>
         /// <remarks>
-        /// All code in this method should be wrapped by an 'if (active)' to prevent running when script should be off.
+        /// All code in this method should be wrapped by ``if (this.active)``
+        /// to prevent running when script should be Disabled.
         /// </remarks>
         public abstract void ScriptTick();
     }
@@ -161,24 +196,11 @@ namespace TestScripts
 
     public class TS_NearbyPedsStartFighting : TestScriptTemplate
     {
-        private bool active;
-
-        public TS_NearbyPedsStartFighting() { }
-
-
-        public override void ScriptKeyUp()
-        {
-            active = !active;
-
-            if (active)
-                GTA.UI.Notification.Show("Fight!: ~g~Active~s~");
-            else
-                GTA.UI.Notification.Show("Fight!: ~r~Disabled~s~");
-        }
+        public TS_NearbyPedsStartFighting() { this.name = "Fight!"; }
 
         public override void ScriptTick()
         {
-            if (active)
+            if (this.active)
             {
                 Ped[] nearbyPeds = World.GetNearbyPeds(Game.Player.Character.Position, 20);
 
@@ -192,32 +214,21 @@ namespace TestScripts
 
         }
 
+        public override void ScriptKeyUp() { }
         public override void ScriptKeyDown() { }
     }
 
 
     public class TS_MatrixMode : TestScriptTemplate
     {
-        private bool active;
-
         private List<Projectile> activeProjs = new List<Projectile>();
         private List<Projectile> deletedProjs = new List<Projectile>();
 
-        public TS_MatrixMode() { }
-
-        public override void ScriptKeyUp()
-        {
-            active = !active;
-
-            if (active)
-                GTA.UI.Notification.Show("Matrix Mode: ~g~Active~s~");
-            else
-                GTA.UI.Notification.Show("Matrix Mode: ~r~Disabled~s~");
-        }
+        public TS_MatrixMode() { this.name = "Matrix Mode"; }
 
         public override void ScriptTick()
         {
-            if (active)
+            if (this.active)
             {
                 // Check for nearby projectiles and add any new ones to the list
                 Projectile[] nearbyProjs = World.GetNearbyProjectiles(Game.Player.Character.Position, 200);
@@ -266,58 +277,42 @@ namespace TestScripts
             }
         }
 
+        public override void ScriptKeyUp() { }
         public override void ScriptKeyDown() { }
     }
 
 
     public class TS_RadiusView : TestScriptTemplate
     {
-        private bool active;
-        float forceRadius;
-        Vector3 forceCirclePos;
-        Vector3 forceTarget;
-        Vector3 forceVectorToTarget;
-        double forceAngle;
+        private float forceRadius;
+        private Vector3 forceCirclePos;
+        private Vector3 forceTarget;
+        private Vector3 forceVectorToTarget;
+        private double forceAngle;
         private Ped player = Game.Player.Character;
 
         public TS_RadiusView()
         {
+            this.name = "Radius Viewer";
+
             // Init variables
-            active = false;     // flag to activate radius display
-            //forceRadius = 15f;    // default testing radius
 
-            forceCirclePos = Vector3.UnitX;  // initial force rotation vector
-            forceAngle = 0;                 // initial force angle
-        }
-
-        public override void ScriptKeyUp()
-        {
-            // (Display an overlay or something on screen at different radii to determine scale of 'radius' parameters.)
-
-            // Activate "radius display"
-            active = !active;
-
-            if (active)
-                GTA.UI.Notification.Show("Radius View: ~g~Active~s~");
-            else
-                GTA.UI.Notification.Show("Radius View: ~r~Disabled~s~");
-
-            //TestAPI.DebugMsg("Force / Rotation: " + forceDir.ToString() + " / " + forceRotation.ToString());
-
+            //forceRadius = 15f;                // default testing radius
+            forceCirclePos = Vector3.UnitX;     // initial force rotation vector
+            forceAngle = 0;                     // initial force angle
         }
 
         public override void ScriptTick()
         {
-            if (active)
+            if (this.active)
             {
                 /* [Planning]
-                 * 
                  * • Alternate implementation ideas:
                  *    - Add a force tangent to player position rotating around a circle, 
                  *      and a second force that pushes entities closer or further to reach the target radius.
                  *    - PID feedback loop?
                  * • Use Tasks to force ragdoll and prevent peds from standing in air?
-                 * 
+                 * • Change height of orbit (lower)? Or make height oscillate up and down?
                  */
 
 
@@ -337,7 +332,7 @@ namespace TestScripts
 
                 // Point on radius of target circle relative to player
                 //forceTarget = playerPosition + forceRadius * forceCirclePos;
-                forceTarget = playerPosition + TestScripts.TEMPFORCERADIUS * forceCirclePos;        // TEMP HACK //
+                forceTarget = playerPosition + TestScripts.TEMPFORCERADIUS * forceCirclePos;   // [HACK] Temp radius (see TestScripts note)
 
 
                 Ped[] nearbyPeds = World.GetNearbyPeds(playerPosition, 80);
@@ -356,59 +351,50 @@ namespace TestScripts
 
         }
 
+        public override void ScriptKeyUp() { }
         public override void ScriptKeyDown() { }
     }
 
 
     public class TS_CarDance : TestScriptTemplate
     {
-        public TS_CarDance() { }
-
-        public override void ScriptKeyUp() { }
+        public TS_CarDance() { this.name = "Dance Time"; }
 
         public override void ScriptTick()
         {
-            // 1. Make all doors open and close rapidly
-            // 2. ??
+            if (this.active)
+            {
+                // 1. Make all doors open and close rapidly
+                // 2. ??
 
 
-            // 1.) Use native functions?
-            //   https://gtamods.com/wiki/SET_VEHICLE_DOOR_OPEN
-            //   https://gtamods.com/wiki/SET_VEHICLE_DOOR_SHUT
-            // Game.Player.Character.CurrentVehicle.??
+                // 1.) Use native functions?
+                //   https://gtamods.com/wiki/SET_VEHICLE_DOOR_OPEN
+                //   https://gtamods.com/wiki/SET_VEHICLE_DOOR_SHUT
+                // Game.Player.Character.CurrentVehicle.??
+            }
         }
 
+        public override void ScriptKeyUp() { }
         public override void ScriptKeyDown() { }
     }
 
 
     public class TS_HelicopterBuddies : TestScriptTemplate
     {
-        private bool active;
-        int MAX_RANGE = 400;
+        private int MAX_RANGE = 400;
         private List<Ped> activePilots = new List<Ped>();
-        Ped player = Game.Player.Character;
+        private Ped player = Game.Player.Character;
 
-        public TS_HelicopterBuddies() { }
-
-        public override void ScriptKeyUp()
-        {
-            active = !active;
-
-            if (active)
-                GTA.UI.Notification.Show("Helicopter Buddies: ~g~Active~s~");
-            else
-                GTA.UI.Notification.Show("Helicopter Buddies: ~r~Disabled~s~");
-        }
+        public TS_HelicopterBuddies() { this.name = "Helicopter Buddies"; }
 
         public override void ScriptTick()
         {
-            // [TODO]
-            // • Fix so that each active heli will only receive a task once (and focus on one target?)
-            // • Activate spotlight or something to indicate pairs of heli's
-            // • Blimps count as heli's. Handle this seperately?
+            // [TODO] Fix so that each active heli will only receive a task once (and focus on one target?)
+            // [TODO] Activate spotlight or something to indicate pairs of heli's
+            // [TODO] Blimps count as heli's. Handle this seperately?
 
-            if (active)
+            if (this.active)
             {
                 /////////////////////////////
                 // Collect active helicopters
@@ -475,7 +461,7 @@ namespace TestScripts
                 }
 
 
-                // TEST Print
+                // [TEST] Print number of pilots
                 Random random = new Random();
                 if (random.Next(100) == 0)
                     TestAPI.DebugMsg<string>("# Pilots : " + activePilots.Count.ToString());
@@ -483,17 +469,15 @@ namespace TestScripts
             }
         }
 
+        public override void ScriptKeyUp() { }
         public override void ScriptKeyDown() { }
     }
 
 
     public class TS_FollowMode : TestScriptTemplate
     {
-        // [TODO]
-        //  • Tweak range/speed constants.
-        //  • Tweak task controlling. Periodically check for changed tasks (like running from a crime) and reset?
-
-        private bool active;
+        // [TODO] Tweak range/speed constants.
+        // [TODO] Tweak task controlling. Periodically check for changed tasks (like running from a crime) and reset?
 
         private const int MAX_RANGE = 500;
         private const float FOLLOW_SPEED = 80f;
@@ -502,21 +486,13 @@ namespace TestScripts
 
         private Ped player = Game.Player.Character;
 
-        public TS_FollowMode() { }
+        public TS_FollowMode() { this.name = "Follow Mode"; }
 
         public override void ScriptKeyUp()
         {
-            active = !active;
-
-            if (active)
+            // Cleanup on disable
+            if (!this.active)
             {
-                GTA.UI.Notification.Show("Follow Mode: ~g~Active~s~");
-            }
-            else
-            {
-                GTA.UI.Notification.Show("Follow Mode: ~r~Disabled~s~");
-
-                // Cleanup
                 foreach (Ped ped in activePeds)
                 {
                     if (ped.IsInVehicle())
@@ -532,7 +508,7 @@ namespace TestScripts
 
         public override void ScriptTick()
         {
-            if (active)
+            if (this.active)
             {
                 // Get player properties
                 Vector3 playerPosition = player.Position;
@@ -595,7 +571,7 @@ namespace TestScripts
                         //    + " (" + ped.GetHashCode().ToString() + ")");
 
 
-                        // TODO ---- Add menu to toggle each class
+                        // [TODO] Add menu to toggle each class
 
                     }
                 }
@@ -609,14 +585,50 @@ namespace TestScripts
 
     public class TS_PreciseTeleport : TestScriptTemplate
     {
-        public override void ScriptKeyUp()
-        {
-
-        }
         public override void ScriptTick()
         {
-
+            if (this.active)
+            {
+                // See START_PLAYER_TELEPORT (https://docs.fivem.net/natives/?_0xAD15F075A4DA0FDE)
+            }
         }
+
+        public override void ScriptKeyUp() { }
+        public override void ScriptKeyDown() { }
+    }
+
+
+    public class TS_Bones : TestScriptTemplate
+    {
+        private int MAX_RANGE = 200;
+        private int CLOSE_RANGE = 5;
+        private Ped player = Game.Player.Character;
+        private Random rand = new Random();
+
+        public override void ScriptTick()
+        {
+            if (this.active)
+            {
+                // [TODO] Change all GetNearbyPeds calls to use the Ped object like this, not a Vector3.
+                //        This leaves the player out of the returned array, and the position doesn't need to be constantly read.
+                Ped[] nearbyPeds = World.GetNearbyPeds(player, MAX_RANGE);
+
+                foreach (Ped ped in nearbyPeds)
+                {
+                    // Check if there are any close-by peds to this ped
+                    Ped[] pedsInPersonalSpace = World.GetNearbyPeds(ped, CLOSE_RANGE);
+                    if (pedsInPersonalSpace.Length > 1)
+                    {
+                        if (rand.NextDouble() < 0.1)  // 10% chance
+                            // If roll is successful, choose a random close-by ped to attach to.
+                            pedsInPersonalSpace[rand.Next(pedsInPersonalSpace.Length)].AttachTo(ped);
+                    }
+                }
+
+            }
+        }
+
+        public override void ScriptKeyUp() { }
         public override void ScriptKeyDown() { }
     }
 
@@ -668,7 +680,7 @@ namespace TestScripts
                     radius -= 5f;
                 else if (radius > 1f)
                     radius -= 1f;
-                else if (radius > 0.21f)  // hack to avoid rounding issues
+                else if (radius > 0.21f)  // avoids rounding issues
                     radius -= 0.2f;
                 else
                     radius = 0.2f;
@@ -677,7 +689,6 @@ namespace TestScripts
             GTA.UI.Screen.ShowSubtitle("~p~Radius: ~h~" + radius.ToString() + "~h~~s~", 2000);
         }
     }
-
 
 
     public static class TestAPI
